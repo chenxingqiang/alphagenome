@@ -196,6 +196,7 @@ def _read_tensor_chunks(
 def _make_output_data(
     output: dna_model_pb2.Output,
     responses: Iterator[PredictResponse | dna_model_pb2.PredictVariantResponse],
+    interval: genome.Interval | None = None,
 ) -> track_data.TrackData | np.ndarray | junction_data.JunctionData:
   """Helper to create an output data object from an output proto."""
   match output.WhichOneof('payload'):
@@ -203,6 +204,7 @@ def _make_output_data(
       return track_data.from_protos(
           output.track_data,
           _read_tensor_chunks(responses, output.track_data.values.chunk_count),
+          interval=interval,
       )
     case 'data':
       chunks = _read_tensor_chunks(responses, output.data.chunk_count)
@@ -214,11 +216,51 @@ def _make_output_data(
           _read_tensor_chunks(
               responses, output.junction_data.values.chunk_count
           ),
+          interval=interval,
       )
     case _:
       raise ValueError(
           f'Unsupported output type: {output.WhichOneof("payload")}'
       )
+
+
+def construct_output_metadata(
+    responses: Iterator[dna_model_pb2.MetadataResponse],
+) -> OutputMetadata:
+  """Constructs an OutputMetadata from a stream of responses."""
+  metadata = {}
+  for response in responses:
+    for metadata_proto in response.output_metadata:
+      match metadata_proto.WhichOneof('payload'):
+        case 'tracks':
+          metadata[metadata_proto.output_type] = track_data.metadata_from_proto(
+              metadata_proto.tracks
+          )
+        case 'junctions':
+          metadata[metadata_proto.output_type] = (
+              junction_data.metadata_from_proto(metadata_proto.junctions)
+          )
+        case _:
+          raise ValueError(
+              'Unsupported metadata type:'
+              f' {metadata_proto.WhichOneof("payload")}'
+          )
+
+  return OutputMetadata(
+      atac=metadata.get(dna_model_pb2.OUTPUT_TYPE_ATAC),
+      cage=metadata.get(dna_model_pb2.OUTPUT_TYPE_CAGE),
+      dnase=metadata.get(dna_model_pb2.OUTPUT_TYPE_DNASE),
+      rna_seq=metadata.get(dna_model_pb2.OUTPUT_TYPE_RNA_SEQ),
+      chip_histone=metadata.get(dna_model_pb2.OUTPUT_TYPE_CHIP_HISTONE),
+      chip_tf=metadata.get(dna_model_pb2.OUTPUT_TYPE_CHIP_TF),
+      splice_sites=metadata.get(dna_model_pb2.OUTPUT_TYPE_SPLICE_SITES),
+      splice_site_usage=metadata.get(
+          dna_model_pb2.OUTPUT_TYPE_SPLICE_SITE_USAGE
+      ),
+      splice_junctions=metadata.get(dna_model_pb2.OUTPUT_TYPE_SPLICE_JUNCTIONS),
+      contact_maps=metadata.get(dna_model_pb2.OUTPUT_TYPE_CONTACT_MAPS),
+      procap=metadata.get(dna_model_pb2.OUTPUT_TYPE_PROCAP),
+  )
 
 
 def _construct_output(
@@ -248,7 +290,11 @@ def _construct_output(
   return output
 
 
-def _make_output(responses: Iterator[PredictResponse]) -> Output:
+def _make_output(
+    responses: Iterator[PredictResponse],
+    *,
+    interval: genome.Interval | None = None,
+) -> Output:
   """Helper to load an Output dataclass from a stream of response protos."""
   outputs = {}
 
@@ -256,10 +302,10 @@ def _make_output(responses: Iterator[PredictResponse]) -> Output:
     match response.WhichOneof('payload'):
       case 'output':
         outputs[response.output.output_type] = _make_output_data(
-            response.output, responses
+            response.output, responses, interval=interval
         )
       case 'tensor_chunk':
-        raise ValueError('Received tensor chunk before output proto!')
+        raise ValueError('Received tensor chunk before output proto.')
       case _:
         raise ValueError(
             f'Unsupported response type: {response.WhichOneof("payload")}'
@@ -286,7 +332,7 @@ def _make_variant_output(
             response.alternate_output, responses
         )
       case 'tensor_chunk':
-        raise ValueError('Received tensor chunk before output proto!')
+        raise ValueError('Received tensor chunk before output proto.')
       case _:
         raise ValueError(
             f'Unsupported response type: {response.WhichOneof("payload")}'
@@ -398,7 +444,7 @@ def _make_score_variant_output(
             )
         )
       case 'tensor_chunk':
-        raise ValueError('Received tensor chunk before output proto!')
+        raise ValueError('Received tensor chunk before output proto.')
       case _:
         raise ValueError(
             f'Unsupported response type: {response.WhichOneof("payload")}'
@@ -444,7 +490,7 @@ def _make_interval_output(
             )
         )
       case 'tensor_chunk':
-        raise ValueError('Received tensor chunk before output proto!')
+        raise ValueError('Received tensor chunk before output proto.')
       case _:
         raise ValueError(
             f'Unsupported response type: {response.WhichOneof("payload")}'
@@ -507,6 +553,7 @@ class DnaClient:
       organism: Organism = Organism.HOMO_SAPIENS,
       requested_outputs: Iterable[OutputType],
       ontology_terms: Iterable[ontology.OntologyTerm | str] | None,
+      interval: genome.Interval | None = None,
   ) -> Output:
     """Generate predictions for a given DNA sequence.
 
@@ -517,6 +564,8 @@ class DnaClient:
         predictions to return.
       ontology_terms: Iterable of ontology terms or curies to generate
         predictions for. If None returns all ontologies.
+      interval: Optional interval from which the sequence was derived. This is
+        used as the interval in the output TrackData.
 
     Returns:
       Output for the provided DNA sequence.
@@ -541,7 +590,7 @@ class DnaClient:
     responses = dna_model_service_pb2_grpc.DnaModelServiceStub(
         self._channel
     ).PredictSequence(iter([request]), metadata=self._metadata)
-    return _make_output(responses)
+    return _make_output(responses, interval=interval)
 
   def predict_sequences(
       self,
@@ -552,6 +601,7 @@ class DnaClient:
       ontology_terms: Iterable[ontology.OntologyTerm | str] | None,
       progress_bar: bool = True,
       max_workers: int = _DEFAULT_MAX_WORKERS,
+      intervals: Sequence[genome.Interval] | None = None,
   ) -> list[Output]:
     """Generate predictions for a given DNA sequence.
 
@@ -564,6 +614,9 @@ class DnaClient:
         predictions for. If None returns all ontologies.
       progress_bar: If True, show a progress bar.
       max_workers: Number of parallel workers to use.
+      intervals: Optional intervals from which the sequences were derived. This
+        is used as the interval in the output TrackData. Must be the same length
+        as `sequences` if provided.
 
     Returns:
       Outputs for the provided DNA sequences.
@@ -578,8 +631,11 @@ class DnaClient:
               organism=organism,
               ontology_terms=ontology_terms,
               requested_outputs=requested_outputs,
+              interval=interval,
           )
-          for sequence in sequences
+          for sequence, interval in zip(
+              sequences, intervals or [None] * len(sequences), strict=True
+          )
       ]
       futures_as_completed = tqdm.auto.tqdm(
           concurrent.futures.as_completed(futures),
@@ -1109,42 +1165,7 @@ class DnaClient:
     responses = dna_model_service_pb2_grpc.DnaModelServiceStub(
         self._channel
     ).GetMetadata(request, metadata=self._metadata)
-
-    metadata = {}
-    for response in responses:
-      for metadata_proto in response.output_metadata:
-        match metadata_proto.WhichOneof('payload'):
-          case 'tracks':
-            metadata[metadata_proto.output_type] = (
-                track_data.metadata_from_proto(metadata_proto.tracks)
-            )
-          case 'junctions':
-            metadata[metadata_proto.output_type] = (
-                junction_data.metadata_from_proto(metadata_proto.junctions)
-            )
-          case _:
-            raise ValueError(
-                'Unsupported metadata type:'
-                f' {metadata_proto.WhichOneof("payload")}'
-            )
-
-    return OutputMetadata(
-        atac=metadata.get(dna_model_pb2.OUTPUT_TYPE_ATAC),
-        cage=metadata.get(dna_model_pb2.OUTPUT_TYPE_CAGE),
-        dnase=metadata.get(dna_model_pb2.OUTPUT_TYPE_DNASE),
-        rna_seq=metadata.get(dna_model_pb2.OUTPUT_TYPE_RNA_SEQ),
-        chip_histone=metadata.get(dna_model_pb2.OUTPUT_TYPE_CHIP_HISTONE),
-        chip_tf=metadata.get(dna_model_pb2.OUTPUT_TYPE_CHIP_TF),
-        splice_sites=metadata.get(dna_model_pb2.OUTPUT_TYPE_SPLICE_SITES),
-        splice_site_usage=metadata.get(
-            dna_model_pb2.OUTPUT_TYPE_SPLICE_SITE_USAGE
-        ),
-        splice_junctions=metadata.get(
-            dna_model_pb2.OUTPUT_TYPE_SPLICE_JUNCTIONS
-        ),
-        contact_maps=metadata.get(dna_model_pb2.OUTPUT_TYPE_CONTACT_MAPS),
-        procap=metadata.get(dna_model_pb2.OUTPUT_TYPE_PROCAP),
-    )
+    return construct_output_metadata(responses)
 
 
 def create(

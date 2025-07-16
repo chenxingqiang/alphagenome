@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import dataclasses
 import functools
 import time
 from unittest import mock
@@ -455,6 +456,7 @@ class ClientTest(parameterized.TestCase):
       ),
       bytes_per_chunk=[0, 128],
       model_version=[None, dna_client.ModelVersion.FOLD_0],
+      with_interval=[True, False],
   )
   def test_predict_sequence(
       self,
@@ -463,6 +465,7 @@ class ClientTest(parameterized.TestCase):
       expected: dna_client.Output,
       bytes_per_chunk: int,
       model_version: dna_client.ModelVersion | None,
+      with_interval: bool,
   ):
     mock_predictions = _create_example_model_predictions(
         sequence_length=sequence_length
@@ -479,6 +482,18 @@ class ClientTest(parameterized.TestCase):
         ],
         model_version=model_version.name if model_version else None,
     )
+
+    interval = None
+    if with_interval:
+      interval = genome.Interval('chr1', 0, sequence_length)
+      expected_dict = {}
+      for field in dataclasses.fields(expected):
+        output_type = field.metadata['output_type']
+        if output := expected.get(output_type):
+          expected_dict[field.name] = dataclasses.replace(
+              output, interval=interval
+          )
+      expected = dna_client.Output(**expected_dict)
 
     def _mock_generate(requests, metadata):
       del metadata
@@ -501,6 +516,7 @@ class ClientTest(parameterized.TestCase):
         organism=dna_client.Organism.HOMO_SAPIENS,
         ontology_terms=['UBERON:00004'],
         requested_outputs=requested_output_types,
+        interval=interval,
     )
 
     self.assertEqual(outputs, expected)
@@ -511,6 +527,7 @@ class ClientTest(parameterized.TestCase):
       num_predictions=[1, 4],
       num_workers=[1, 4],
       bytes_per_chunk=[0, 128],
+      with_interval=[True, False],
   )
   def test_predict_sequences(
       self,
@@ -518,9 +535,14 @@ class ClientTest(parameterized.TestCase):
       num_predictions: int,
       num_workers: int,
       bytes_per_chunk: int,
+      with_interval: bool,
   ):
+    interval = None
+    if with_interval:
+      interval = genome.Interval('chr1', 0, sequence_length)
+
     mock_predictions = _create_example_model_predictions(
-        sequence_length=sequence_length
+        sequence_length=sequence_length, interval=interval
     )
 
     def _mock_generate(requests, metadata):
@@ -543,6 +565,7 @@ class ClientTest(parameterized.TestCase):
         requested_outputs=[*dna_client.OutputType],
         progress_bar=False,
         max_workers=num_workers,
+        intervals=[interval] * num_predictions if with_interval else None,
     )
     for output in outputs:
       self.assertEqual(output, mock_predictions)

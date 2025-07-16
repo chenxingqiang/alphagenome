@@ -276,7 +276,7 @@ class Interval:
     elif obj.strand == STRAND_NEGATIVE:
       obj.strand = STRAND_POSITIVE
     elif obj.strand == STRAND_UNSTRANDED:
-      raise ValueError('Cannot swap unstranded intervals!')
+      raise ValueError('Cannot swap unstranded intervals.')
     return obj
 
   def as_unstranded(self) -> Self:

@@ -355,12 +355,17 @@ def metadata_from_proto(
 def from_protos(
     proto: dna_model_pb2.JunctionData,
     chunks: Iterable[tensor_pb2.TensorChunk] = (),
+    *,
+    interval: genome.Interval | None = None,
 ) -> JunctionData:
   """Converts a `JunctionData` protobuf to a `JunctionData` object.
 
   Args:
     proto: A `JunctionData` protobuf message.
     chunks: A sequence of `TensorChunk` protobuf messages.
+    interval: Optional `Interval` object representing the genomic region
+      containing the junctions. Only used if the proto does not have an
+      interval.
 
   Returns:
     A `JunctionData` object.
@@ -372,7 +377,6 @@ def from_protos(
       dna_model_pb2.JunctionsMetadata(metadata=proto.metadata)
   )
 
-  interval = None
   if proto.HasField('interval'):
     interval = genome.Interval.from_proto(proto.interval)
 

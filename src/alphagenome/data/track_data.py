@@ -1034,12 +1034,16 @@ def metadata_from_proto(
 def from_protos(
     proto: dna_model_pb2.TrackData,
     chunks: Iterable[tensor_pb2.TensorChunk] = (),
+    *,
+    interval: genome.Interval | None = None,
 ) -> TrackData:
   """Creates a `TrackData` object from protobuf messages.
 
   Args:
     proto: A `TrackData` protobuf message.
     chunks: A sequence of `TensorChunk` protobuf messages.
+    interval: Optional `Interval` object representing the genomic region
+      containing the tracks. Only used if the proto does not have an interval.
 
   Returns:
     A `TrackData` object.
@@ -1051,7 +1055,6 @@ def from_protos(
   values = tensor_utils.unpack_proto(proto.values, chunks)
   values = tensor_utils.upcast_floating(values)
   resolution = proto.resolution if proto.HasField('resolution') else 1
-  interval = None
   if proto.HasField('interval'):
     interval = genome.Interval.from_proto(proto.interval)
 

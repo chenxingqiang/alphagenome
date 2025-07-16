@@ -73,6 +73,7 @@ class TrackDataInitTest(parameterized.TestCase):
       include_endedness=[True, False],
       include_genetically_modified=[True, False],
       include_data_source=[True, False],
+      override_interval=[True, False],
   )
   def test_proto_roundtrip(
       self,
@@ -88,6 +89,7 @@ class TrackDataInitTest(parameterized.TestCase):
       include_endedness: bool,
       include_genetically_modified: bool,
       include_data_source: bool,
+      override_interval: bool,
   ):
     df = pd.DataFrame({
         'name': [f'track_{i}' for i in range(7)],
@@ -193,9 +195,9 @@ class TrackDataInitTest(parameterized.TestCase):
         ],
         dtype=dtypes,
     )
-    interval = (
+    expected_interval = (
         genome.Interval('chr1', 0, values.shape[0] * resolution)
-        if include_interval
+        if include_interval or override_interval
         else None
     )
 
@@ -209,12 +211,18 @@ class TrackDataInitTest(parameterized.TestCase):
     )
 
     proto, chunks = metadata.to_protos(bytes_per_chunk=bytes_per_chunk)
-    roundtrip = track_data.from_protos(proto, chunks)
+    roundtrip = track_data.from_protos(
+        proto,
+        chunks,
+        interval=genome.Interval('chr1', 0, values.shape[0] * resolution)
+        if override_interval
+        else None,
+    )
 
     np.testing.assert_array_equal(roundtrip.values, values)
     pd.testing.assert_frame_equal(roundtrip.metadata, df)
     self.assertEqual(roundtrip.resolution, resolution)
-    self.assertEqual(roundtrip.interval, interval)
+    self.assertEqual(roundtrip.interval, expected_interval)
 
   @parameterized.product(
       bytes_per_chunk=[0, 4, 8], dtype=[ml_dtypes.bfloat16, np.float16]

@@ -30,8 +30,9 @@ analyses requiring more than 1 million predictions.
 
 You can get started by
 [getting an API key](https://deepmind.google.com/science/alphagenome), and
-following our [Quick Start Guide](./colabs/quick_start.ipynb). Please also check
-out our installation guide, tutorials with comprehensive overviews of plotting,
+following our [Quick Start Guide](./colabs/quick_start.ipynb), or watching our
+[AlphaGenome 101 tutorial](https://youtu.be/Xbvloe13nak). Please also check out
+our installation guide, tutorials with comprehensive overviews of plotting,
 variant scoring and other use cases, and our API reference documentation.
 
 <!-- mdformat off(Turn off mdformat to retain myst syntax.) -->
@@ -76,5 +77,6 @@ api/index
 tutorials/index
 user_guides/index
 faqs
+Community <https://www.alphagenomecommunity.com>
 references
 ```
